@@ -155,7 +155,7 @@ type CacheControl = { type: "ephemeral" };
  * tool_result in the user message, leaving the assistant blocks outside the
  * window and causing cache misses on every subsequent turn.
  */
-function convertMessages(
+export function convertMessages(
 	messages: Message[],
 	isOAuth: boolean,
 	cacheControl: CacheControl,
@@ -473,6 +473,10 @@ function streamWithDualCacheBreakpoints(
 					10240;
 				(params as any).thinking = { type: "enabled", budget_tokens: budget };
 			}
+
+			// Fire onPayload before the network call so tests can capture the full
+			// request payload without needing a real API key.
+			options?.onPayload?.(params);
 
 			// Stream
 			const anthropicStream = client.messages.stream(params as any, {
