@@ -1,0 +1,38 @@
+{
+  "name": "pi-better-messages-cache",
+  "version": "1.0.0",
+  "description": "Pi extension: dual cache-breakpoint strategy for Anthropic models — marks both the last assistant tool_use block and the last user message block with cache_control, dramatically improving cache hit rates on MiniMax, Kimi, and other Anthropic-compatible providers.",
+  "keywords": [
+    "pi-package",
+    "pi-extension",
+    "anthropic",
+    "cache",
+    "prompt-caching",
+    "pi-coding-agent"
+  ],
+  "license": "MIT",
+  "author": "mcowger",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/mcowger/pi-better-messages-cache.git"
+  },
+  "type": "module",
+  "scripts": {
+    "clean": "echo 'nothing to clean'",
+    "build": "echo 'nothing to build'",
+    "check": "echo 'nothing to check'"
+  },
+  "pi": {
+    "extensions": [
+      "./index.ts"
+    ]
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.73.0"
+  },
+  "peerDependencies": {
+    "@mariozechner/pi-ai": "*",
+    "@mariozechner/pi-coding-agent": "*",
+    "@sinclair/typebox": "*"
+  }
+}
