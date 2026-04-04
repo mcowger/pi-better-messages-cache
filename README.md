@@ -60,6 +60,18 @@ This dual-marking pattern aligns with the cache strategies used by
 | MiniMax / Kimi | near-zero cache hits | **80 %+ cache hit rate** |
 | Anthropic native | baseline | small positive improvement |
 
+#### Built-in pi caching — "cache hit wall" (MiniMax)
+
+<img src="docs/builtin-cache-hit-wall.png" width="50%">
+
+> **Note:** Notice the "cache hit wall" at ~4.2K cache hits — the orange cache-hit line flatlines, while the cache-miss line continues climbing.
+
+#### With pi-better-messages-cache extension — drastically improved cache hits
+
+<img src="docs/better-messages-cache-minimax-comparison.png" width="50%">
+
+> **Note:** Cache hits continue climbing throughout the session — the orange line no longer flatlines, achieving the dual cache-breakpoint strategy's intended behavior.
+
 ---
 
 ## How it works

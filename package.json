@@ -17,6 +17,10 @@
     "url": "https://github.com/mcowger/pi-better-messages-cache.git"
   },
   "type": "module",
+  "files": [
+    "index.ts",
+    "test"
+  ],
   "scripts": {
     "clean": "echo 'nothing to clean'",
     "build": "echo 'nothing to build'",
