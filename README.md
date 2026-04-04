@@ -88,16 +88,16 @@ config, or other settings**.
 
 ```bash
 # Global install (all projects)
-pi install npm:pi-better-messages-cache
+pi install npm:@mcowger/pi-better-messages-cache
 
 # Project-local install
-pi install -l npm:pi-better-messages-cache
+pi install -l npm:@mcowger/pi-better-messages-cache
 ```
 
 ### Try without installing
 
 ```bash
-pi -e npm:pi-better-messages-cache
+pi -e npm:@mcowger/pi-better-messages-cache
 ```
 
 ### From git (latest unreleased)
