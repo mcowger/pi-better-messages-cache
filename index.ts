@@ -38,7 +38,7 @@
  *
  * Installation
  * ------------
- *   pi install npm:pi-better-messages-cache
+ *   pi install npm:@mcowger/pi-better-messages-cache
  */
 
 import Anthropic from "@anthropic-ai/sdk";

@@ -119,7 +119,7 @@ pi install git:github.com/mcowger/pi-better-messages-cache
 ## Uninstalling
 
 ```bash
-pi remove npm:pi-better-messages-cache
+pi remove npm:@mcowger/pi-better-messages-cache
 ```
 
 This restores the built-in Anthropic stream handler automatically.
