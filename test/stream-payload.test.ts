@@ -193,6 +193,68 @@ describe("stream payload — assistant tool_use cache_control (dual-cache part 1
 	});
 });
 
+describe("stream payload — cache_control limit", () => {
+	it("trims older message cache markers so the request never exceeds four total", async () => {
+		const context = {
+			systemPrompt: "sys",
+			messages: [
+				{ role: "user", content: "turn 1", timestamp: 0 },
+				{
+					role: "assistant",
+					content: [{ type: "toolCall", id: "tc1", name: "bash", arguments: { command: "echo 1" } }],
+					api: "anthropic-messages",
+					provider: "anthropic",
+					model: "claude-sonnet-4-20250514",
+					usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: {} },
+					stopReason: "toolUse",
+					timestamp: 0,
+				},
+				{ role: "toolResult", toolCallId: "tc1", toolName: "bash", content: [{ type: "text", text: "r1" }], isError: false, timestamp: 0 },
+				{
+					role: "assistant",
+					content: [{ type: "toolCall", id: "tc2", name: "bash", arguments: { command: "echo 2" } }],
+					api: "anthropic-messages",
+					provider: "anthropic",
+					model: "claude-sonnet-4-20250514",
+					usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: {} },
+					stopReason: "toolUse",
+					timestamp: 0,
+				},
+				{ role: "toolResult", toolCallId: "tc2", toolName: "bash", content: [{ type: "text", text: "r2" }], isError: false, timestamp: 0 },
+				{
+					role: "assistant",
+					content: [{ type: "toolCall", id: "tc3", name: "bash", arguments: { command: "echo 3" } }],
+					api: "anthropic-messages",
+					provider: "anthropic",
+					model: "claude-sonnet-4-20250514",
+					usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: {} },
+					stopReason: "toolUse",
+					timestamp: 0,
+				},
+				{ role: "toolResult", toolCallId: "tc3", toolName: "bash", content: [{ type: "text", text: "r3" }], isError: false, timestamp: 0 },
+			],
+		};
+		const payload = await capturePayload(context);
+
+		const allCacheMarkedBlocks = [
+			...(payload.system ?? []),
+			...payload.messages.flatMap((m: any) => Array.isArray(m.content) ? m.content : []),
+		].filter((b: any) => b?.cache_control);
+
+		expect(allCacheMarkedBlocks).toHaveLength(4);
+
+		const assistantMsgs = payload.messages.filter((m: any) => m.role === "assistant");
+		expect(assistantMsgs[0].content[0].cache_control).toBeUndefined();
+		expect(assistantMsgs[1].content[0].cache_control).toEqual({ type: "ephemeral" });
+		expect(assistantMsgs[2].content[0].cache_control).toEqual({ type: "ephemeral" });
+
+		const userMsgs = payload.messages.filter((m: any) => m.role === "user");
+		expect(userMsgs[0].content[0].cache_control).toBeUndefined();
+		const lastUserLastBlock = userMsgs[userMsgs.length - 1].content[userMsgs[userMsgs.length - 1].content.length - 1];
+		expect(lastUserLastBlock.cache_control).toEqual({ type: "ephemeral" });
+	});
+});
+
 describe("stream payload — general structure", () => {
 	it("includes the correct model id", async () => {
 		const context = {

@@ -53,6 +53,32 @@ turn N+1
 This dual-marking pattern aligns with the cache strategies used by
 **OpenCode**, **Kilo Code**, and **Roo Code**.
 
+### Anthropic cache breakpoint limit
+
+Anthropic-compatible APIs allow a maximum of **4 total blocks** with
+`cache_control` in a single request.
+
+That limit applies across the **entire payload**, including:
+- system prompt blocks
+- assistant `tool_use` blocks
+- user / `tool_result` blocks
+
+In longer multi-turn conversations, a naive dual-marking strategy can
+accidentally exceed that limit and trigger errors like:
+
+```text
+A maximum of 4 blocks with cache_control may be provided. Found 5.
+```
+
+To prevent this, this extension now enforces the limit before sending the
+request:
+- keep system prompt cache markers intact
+- keep the **newest** message-level cache breakpoints
+- remove **older** message-level cache breakpoints first
+
+This preserves the most useful recent cache anchors while ensuring requests
+never exceed Anthropic's hard cap.
+
 ### Empirical impact (from PR #1737 field data)
 
 | Provider | Before | After |

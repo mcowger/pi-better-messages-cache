@@ -344,6 +344,40 @@ function mapStopReason(reason: string): StopReason {
 	}
 }
 
+/**
+ * Anthropic allows at most 4 blocks with cache_control across the entire
+ * request payload (system + messages). Preserve the newest message-level
+ * breakpoints and trim older ones first; keep system markers intact.
+ */
+function enforceCacheControlLimit(
+	params: Pick<MessageCreateParamsStreaming, "messages" | "system">,
+	maxBreakpoints = 4,
+): void {
+	const systemBlocks = Array.isArray(params.system) ? params.system : [];
+	const systemMarkerCount = systemBlocks.reduce(
+		(count, block: any) => count + (block?.cache_control ? 1 : 0),
+		0,
+	);
+
+	const messageMarkers: any[] = [];
+	for (const message of params.messages ?? []) {
+		if (!Array.isArray((message as any).content)) continue;
+		for (const block of (message as any).content) {
+			if (block?.cache_control) {
+				messageMarkers.push(block);
+			}
+		}
+	}
+
+	const totalMarkers = systemMarkerCount + messageMarkers.length;
+	if (totalMarkers <= maxBreakpoints) return;
+
+	const markersToRemove = totalMarkers - maxBreakpoints;
+	for (const block of messageMarkers.slice(0, markersToRemove)) {
+		delete block.cache_control;
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Streaming implementation
 // ---------------------------------------------------------------------------
@@ -457,6 +491,8 @@ function streamWithDualCacheBreakpoints(
 			if (context.tools && context.tools.length > 0) {
 				params.tools = convertTools(context.tools, isOAuth);
 			}
+
+			enforceCacheControlLimit(params);
 
 			// Extended thinking / reasoning
 			if (options?.reasoning && model.reasoning) {
