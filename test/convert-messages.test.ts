@@ -510,44 +510,73 @@ describe("steering interruption — no consecutive user messages", () => {
 	// before the user's steering message. convertMessages must merge them into
 	// a single user turn so the Anthropic API never sees two consecutive user
 	// roles.
-	it("merges a synthetic toolResult and following user message into one user turn", () => {
+	it("inserts synthetic tool_results when assistant tool_use is followed directly by a user text message", () => {
+		// Matches the aborted-turn trace: assistant emits tool_use blocks but
+		// the run is aborted before any tool executes, then user sends a message.
 		const msgs = [
-			userMsg("do X"),
-			// assistant started a tool call with stopReason=toolUse but was interrupted
-			assistantMsg([toolCallBlock("id1", "bash")]),
-			// synthetic tool result inserted by transformMessages
-			toolResultMsg("id1", "No result provided", true),
-			// user's redirecting/steering message
-			userMsg("actually do Y instead"),
+			userMsg("read every file"),
+			assistantMsg([
+				textBlock("I'll read them."),
+				toolCallBlock("id1", "bash"),
+				toolCallBlock("id2", "bash"),
+				toolCallBlock("id3", "bash"),
+			]),
+			// no tool results — aborted before execution
+			userMsg("actually just count the files"),
 		];
 		const result = convertMessages(msgs, false, CC);
 
-		// Must not contain two consecutive user-role messages
+		// No consecutive user messages
 		for (let i = 1; i < result.length; i++) {
 			if (result[i].role === "user") {
 				expect(result[i - 1].role).not.toBe("user");
 			}
 		}
 
-		// The tool_result and the user text should be in the same user message
+		// Should be: user, assistant, single merged user (tool_results + steering text)
+		const roles = result.map((m: any) => m.role);
+		expect(roles).toEqual(["user", "assistant", "user"]);
+
+		// The merged user message should have 3 tool_result blocks + 1 text block
+		const lastUser = result[2];
+		const types = lastUser.content.map((b: any) => b.type);
+		expect(types.filter((t: string) => t === "tool_result")).toHaveLength(3);
+		expect(types).toContain("text");
+		expect(lastUser.content.filter((b: any) => b.type === "tool_result").every((b: any) => b.is_error === true)).toBe(true);
+	});
+
+	it("merges real (non-synthetic) tool results already in user-role message with following user message", () => {
+		// This is the case from the trace: pi sends tool_result blocks already
+		// wrapped in a user message, followed by a steering user message.
+		// convertMessages must detect and merge them.
+		const msgs = [
+			userMsg("do X"),
+			assistantMsg([toolCallBlock("id1", "read"), toolCallBlock("id2", "read"), toolCallBlock("id3", "read")]),
+			// pi already batched the tool results into a user message
+			{
+				role: "user" as const,
+				content: [
+					{ type: "tool_result", tool_use_id: "id1", content: "r1", is_error: false },
+					{ type: "tool_result", tool_use_id: "id2", content: "r2", is_error: false },
+					{ type: "tool_result", tool_use_id: "id3", content: "r3", is_error: false },
+				] as any,
+				timestamp: TS,
+			},
+			// steering message injected mid-turn
+			userMsg("I told you to think deeply"),
+		];
+		const result = convertMessages(msgs, false, CC);
+
+		for (let i = 1; i < result.length; i++) {
+			if (result[i].role === "user") {
+				expect(result[i - 1].role).not.toBe("user");
+			}
+		}
+
 		const lastUser = result.filter((m: any) => m.role === "user").at(-1)!;
 		const types = lastUser.content.map((b: any) => b.type);
 		expect(types).toContain("tool_result");
 		expect(types).toContain("text");
-	});
-
-	it("still applies cache_control to the last block of the merged user turn", () => {
-		const msgs = [
-			userMsg("do X"),
-			assistantMsg([toolCallBlock("id1", "bash")]),
-			toolResultMsg("id1", "No result provided", true),
-			userMsg("actually do Y instead"),
-		];
-		const result = convertMessages(msgs, false, CC);
-
-		const lastUser = result.filter((m: any) => m.role === "user").at(-1)!;
-		const lastBlock = lastUser.content.at(-1);
-		expect(lastBlock.cache_control).toEqual(CC);
 	});
 
 	it("handles multiple consecutive toolResults followed by a user message", () => {

@@ -166,6 +166,37 @@ export function convertMessages(
 	for (let i = 0; i < messages.length; i++) {
 		const msg = messages[i];
 
+		// If this is an assistant message with tool_use blocks, check that the
+		// next message contains matching tool_results. If not (aborted turn,
+		// steering injection, etc.), insert synthetic error tool_results so the
+		// API never sees an unmatched tool_use.
+		if (msg.role === "assistant") {
+			const toolCalls = (msg.content as any[]).filter((b) => b.type === "toolCall");
+			if (toolCalls.length > 0) {
+				const next = messages[i + 1];
+				const nextIsToolResults =
+					next?.role === "toolResult" ||
+					(next?.role === "user" && Array.isArray(next.content) &&
+						(next.content as any[]).every((b) => b.type === "tool_result"));
+				if (!nextIsToolResults) {
+					// Inject synthetic tool_result messages for each orphaned tool_use
+					const synthetics: Message[] = toolCalls.map((tc) => ({
+						role: "toolResult" as const,
+						toolCallId: tc.id,
+						toolName: tc.name,
+						content: [{ type: "text", text: "No result: tool call was interrupted" }],
+						isError: true,
+						timestamp: Date.now(),
+					}));
+					messages = [
+						...messages.slice(0, i + 1),
+						...synthetics,
+						...messages.slice(i + 1),
+					];
+				}
+			}
+		}
+
 		// ── user message ────────────────────────────────────────────────────
 		if (msg.role === "user") {
 			if (typeof msg.content === "string") {
@@ -173,25 +204,16 @@ export function convertMessages(
 					params.push({ role: "user", content: sanitizeSurrogates(msg.content) });
 				}
 			} else {
-				const blocks: ContentBlockParam[] = msg.content
-					.map((item) => {
-						if (item.type === "text") {
-							return {
-								type: "text" as const,
-								text: sanitizeSurrogates(item.text),
-							};
-						}
-						const img = item as ImageContent;
-						return {
-							type: "image" as const,
-							source: {
-								type: "base64" as const,
-								media_type: img.mimeType as any,
-								data: img.data,
-							},
-						};
-					})
-					.filter((b) => b.type !== "text" || (b as any).text.trim().length > 0);
+				const blocks: ContentBlockParam[] = (msg.content as any[]).flatMap((item) => {
+					// Pass tool_result blocks through unchanged (already in Anthropic format)
+					if ((item as any).type === "tool_result") return [item];
+					if (item.type === "text") {
+						const text = sanitizeSurrogates(item.text);
+						return text.trim().length > 0 ? [{ type: "text" as const, text }] : [];
+					}
+					const img = item as ImageContent;
+					return [{ type: "image" as const, source: { type: "base64" as const, media_type: img.mimeType as any, data: img.data } }];
+				});
 				if (blocks.length > 0) {
 					params.push({ role: "user", content: blocks });
 				}
@@ -281,35 +303,8 @@ export function convertMessages(
 				j++;
 			}
 
-			// If a plain user message immediately follows the tool results, merge it
-			// into the same user turn. This prevents consecutive user-role messages
-			// when transformMessages inserts a synthetic toolResult before a
-			// steering/interrupting user message (e.g. user redirects mid-tool-call).
-			const merged: ContentBlockParam[] = [...toolResults];
-			if (j < messages.length && messages[j].role === "user") {
-				const userMsg = messages[j];
-				const userBlocks: ContentBlockParam[] =
-					typeof userMsg.content === "string"
-						? [{ type: "text" as const, text: sanitizeSurrogates(userMsg.content) }]
-						: (userMsg.content as (TextContent | ImageContent)[]).flatMap((item) => {
-								if (item.type === "text") {
-									const text = sanitizeSurrogates(item.text);
-									return text.trim().length > 0
-										? [{ type: "text" as const, text }]
-										: [];
-								}
-								const img = item as ImageContent;
-								return [{
-									type: "image" as const,
-									source: { type: "base64" as const, media_type: img.mimeType as any, data: img.data },
-								}];
-						  });
-				merged.push(...userBlocks);
-				j++;
-			}
-
 			i = j - 1; // skip lookahead messages in outer loop
-			params.push({ role: "user", content: merged });
+			params.push({ role: "user", content: toolResults });
 		}
 	}
 
@@ -341,7 +336,33 @@ export function convertMessages(
 		}
 	}
 
-	return params;
+	// -------------------------------------------------------------------------
+	// Merge consecutive user-role params into one.
+	// This handles all cases where pi emits back-to-back user messages:
+	//   - tool results followed by a steering message
+	//   - synthetic tool results (from transformMessages) before a steering message
+	//   - aborted assistant stripped by transformMessages leaving tool results
+	//     adjacent to the next user message
+	//   - multiple steering messages queued during tool execution
+	// -------------------------------------------------------------------------
+	const merged: any[] = [];
+	for (const param of params) {
+		const prev = merged[merged.length - 1];
+		if (prev && prev.role === "user" && param.role === "user") {
+			// Flatten both sides to block arrays and concatenate
+			const prevBlocks: any[] = Array.isArray(prev.content)
+				? prev.content
+				: [{ type: "text", text: prev.content }];
+			const nextBlocks: any[] = Array.isArray(param.content)
+				? param.content
+				: [{ type: "text", text: param.content }];
+			prev.content = [...prevBlocks, ...nextBlocks];
+		} else {
+			merged.push(param);
+		}
+	}
+
+	return merged;
 }
 
 function convertTools(tools: Tool[], isOAuth: boolean): any[] {
