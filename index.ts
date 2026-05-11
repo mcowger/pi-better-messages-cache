@@ -280,9 +280,36 @@ export function convertMessages(
 				});
 				j++;
 			}
-			i = j - 1; // skip lookahead messages in outer loop
 
-			params.push({ role: "user", content: toolResults });
+			// If a plain user message immediately follows the tool results, merge it
+			// into the same user turn. This prevents consecutive user-role messages
+			// when transformMessages inserts a synthetic toolResult before a
+			// steering/interrupting user message (e.g. user redirects mid-tool-call).
+			const merged: ContentBlockParam[] = [...toolResults];
+			if (j < messages.length && messages[j].role === "user") {
+				const userMsg = messages[j];
+				const userBlocks: ContentBlockParam[] =
+					typeof userMsg.content === "string"
+						? [{ type: "text" as const, text: sanitizeSurrogates(userMsg.content) }]
+						: (userMsg.content as (TextContent | ImageContent)[]).flatMap((item) => {
+								if (item.type === "text") {
+									const text = sanitizeSurrogates(item.text);
+									return text.trim().length > 0
+										? [{ type: "text" as const, text }]
+										: [];
+								}
+								const img = item as ImageContent;
+								return [{
+									type: "image" as const,
+									source: { type: "base64" as const, media_type: img.mimeType as any, data: img.data },
+								}];
+						  });
+				merged.push(...userBlocks);
+				j++;
+			}
+
+			i = j - 1; // skip lookahead messages in outer loop
+			params.push({ role: "user", content: merged });
 		}
 	}
 

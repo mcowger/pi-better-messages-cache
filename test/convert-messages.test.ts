@@ -502,7 +502,80 @@ describe("surrogate character sanitisation", () => {
 });
 
 // ---------------------------------------------------------------------------
-// 7. Edge cases
+// 7. Steering / interruption — synthetic tool result + user message
+// ---------------------------------------------------------------------------
+
+describe("steering interruption — no consecutive user messages", () => {
+	// This is the bug scenario: transformMessages inserts a synthetic toolResult
+	// before the user's steering message. convertMessages must merge them into
+	// a single user turn so the Anthropic API never sees two consecutive user
+	// roles.
+	it("merges a synthetic toolResult and following user message into one user turn", () => {
+		const msgs = [
+			userMsg("do X"),
+			// assistant started a tool call with stopReason=toolUse but was interrupted
+			assistantMsg([toolCallBlock("id1", "bash")]),
+			// synthetic tool result inserted by transformMessages
+			toolResultMsg("id1", "No result provided", true),
+			// user's redirecting/steering message
+			userMsg("actually do Y instead"),
+		];
+		const result = convertMessages(msgs, false, CC);
+
+		// Must not contain two consecutive user-role messages
+		for (let i = 1; i < result.length; i++) {
+			if (result[i].role === "user") {
+				expect(result[i - 1].role).not.toBe("user");
+			}
+		}
+
+		// The tool_result and the user text should be in the same user message
+		const lastUser = result.filter((m: any) => m.role === "user").at(-1)!;
+		const types = lastUser.content.map((b: any) => b.type);
+		expect(types).toContain("tool_result");
+		expect(types).toContain("text");
+	});
+
+	it("still applies cache_control to the last block of the merged user turn", () => {
+		const msgs = [
+			userMsg("do X"),
+			assistantMsg([toolCallBlock("id1", "bash")]),
+			toolResultMsg("id1", "No result provided", true),
+			userMsg("actually do Y instead"),
+		];
+		const result = convertMessages(msgs, false, CC);
+
+		const lastUser = result.filter((m: any) => m.role === "user").at(-1)!;
+		const lastBlock = lastUser.content.at(-1);
+		expect(lastBlock.cache_control).toEqual(CC);
+	});
+
+	it("handles multiple consecutive toolResults followed by a user message", () => {
+		const msgs = [
+			userMsg("do X"),
+			assistantMsg([toolCallBlock("id1", "bash"), toolCallBlock("id2", "read")]),
+			toolResultMsg("id1", "No result provided", true),
+			toolResultMsg("id2", "No result provided", true),
+			userMsg("stop, do Y"),
+		];
+		const result = convertMessages(msgs, false, CC);
+
+		for (let i = 1; i < result.length; i++) {
+			if (result[i].role === "user") {
+				expect(result[i - 1].role).not.toBe("user");
+			}
+		}
+
+		const lastUser = result.filter((m: any) => m.role === "user").at(-1)!;
+		const types = lastUser.content.map((b: any) => b.type);
+		const toolResultCount = types.filter((t: string) => t === "tool_result").length;
+		expect(toolResultCount).toBe(2);
+		expect(types).toContain("text");
+	});
+});
+
+// ---------------------------------------------------------------------------
+// 8. Edge cases
 // ---------------------------------------------------------------------------
 
 describe("edge cases", () => {
