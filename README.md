@@ -137,7 +137,7 @@ pi install git:github.com/mcowger/pi-better-messages-cache
 ## Requirements
 
 - [pi](https://github.com/badlogic/pi-mono) (any recent version)
-- `@mariozechner/pi-coding-agent` and `@mariozechner/pi-ai` (bundled with pi,
+- `@earendil-works/pi-coding-agent` and `@earendil-works/pi-ai` (bundled with pi,
   listed as `peerDependencies`)
 
 ---

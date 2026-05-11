@@ -33,7 +33,7 @@ function assistantMsg(content: any[]): any {
 		content,
 		api: "anthropic-messages",
 		provider: "anthropic",
-		model: "claude-sonnet-4-20250514",
+		model: "claude-sonnet-4-6",
 		usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: {} },
 		stopReason: "toolUse",
 		timestamp: TS,

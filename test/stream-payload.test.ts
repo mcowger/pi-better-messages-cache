@@ -16,7 +16,7 @@ import { describe, expect, it } from "vitest";
 // fields our stream function reads.
 function fakeModel(overrides: Record<string, any> = {}): any {
 	return {
-		id: "claude-sonnet-4-20250514",
+		id: "claude-sonnet-4-6",
 		name: "Claude Sonnet",
 		api: "anthropic-messages",
 		provider: "anthropic",
@@ -261,7 +261,7 @@ describe("stream payload — general structure", () => {
 			messages: [{ role: "user", content: "hi", timestamp: 0 }],
 		};
 		const payload = await capturePayload(context);
-		expect(payload.model).toBe("claude-sonnet-4-20250514");
+		expect(payload.model).toBe("claude-sonnet-4-6");
 	});
 
 	it("includes stream: true", async () => {

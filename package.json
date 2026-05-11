@@ -33,16 +33,13 @@
       "./index.ts"
     ]
   },
-  "dependencies": {
-    "@anthropic-ai/sdk": "^0.73.0"
-  },
+
   "devDependencies": {
-    "@types/node": "^22.0.0",
     "vitest": "^3.0.0"
   },
   "peerDependencies": {
-    "@mariozechner/pi-ai": "*",
-    "@mariozechner/pi-coding-agent": "*",
+    "@earendil-works/pi-ai": "*",
+    "@earendil-works/pi-coding-agent": "*",
     "@sinclair/typebox": "*"
   }
 }
