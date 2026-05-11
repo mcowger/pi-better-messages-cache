@@ -14,7 +14,7 @@
   "author": "mcowger",
   "repository": {
     "type": "git",
-    "url": "https://github.com/mcowger/pi-better-messages-cache.git"
+    "url": "git+https://github.com/mcowger/pi-better-messages-cache.git"
   },
   "type": "module",
   "files": [
