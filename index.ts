@@ -49,6 +49,8 @@ import type {
 import {
 	calculateCost,
 	createAssistantMessageEventStream,
+	parseJsonWithRepair,
+	parseStreamingJson,
 	type Api,
 	type AssistantMessage,
 	type AssistantMessageEventStream,
@@ -65,6 +67,108 @@ import {
 	type ToolResultMessage,
 } from "@earendil-works/pi-ai";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+
+// ---------------------------------------------------------------------------
+// SSE parsing — mirrors the built-in pi-ai Anthropic provider so that
+// parseJsonWithRepair is used instead of the SDK's bare JSON.parse.
+//
+// The Anthropic SDK's stream() method parses each SSE event with a plain
+// JSON.parse. When the model emits raw \t or \n inside a tool-call JSON string
+// (e.g. tab-indented oldText in an Edit call), the wire event looks like:
+//   data: {"delta":{"type":"input_json_delta","partial_json":"\t\tenv: {"}}
+// JSON.parse throws "Bad control character in string literal in JSON at
+// position N" which propagates out of the for-await loop, cuts the stream
+// before content_block_stop fires, and leaves arguments as {}.
+// The error is displayed as the tool result and cannot be retried because
+// the model has no context about what the original arguments were.
+//
+// Fix: use client.messages.create().asResponse() to get the raw HTTP
+// response and parse SSE events ourselves with parseJsonWithRepair, which
+// escapes raw control chars before handing off to JSON.parse.
+// ---------------------------------------------------------------------------
+
+interface SseEvent {
+	event: string | null;
+	data: string;
+	raw: string[];
+}
+
+interface SseDecoderState {
+	event: string | null;
+	data: string[];
+	raw: string[];
+}
+
+const ANTHROPIC_STREAM_EVENTS = new Set([
+	"message_start",
+	"message_delta",
+	"message_stop",
+	"content_block_start",
+	"content_block_delta",
+	"content_block_stop",
+	"ping",
+]);
+
+async function* iterateSseMessages(
+	body: ReadableStream<Uint8Array>,
+	signal?: AbortSignal,
+): AsyncGenerator<SseEvent> {
+	const reader = body.getReader();
+	const decoder = new TextDecoder();
+	let buffer = "";
+	let state: SseDecoderState = { event: null, data: [], raw: [] };
+
+	function flush(): SseEvent | null {
+		if (state.data.length === 0) return null;
+		return { event: state.event, data: state.data.join("\n"), raw: state.raw };
+	}
+
+	try {
+		while (true) {
+			if (signal?.aborted) break;
+			const { done, value } = await reader.read();
+			if (done) break;
+			buffer += decoder.decode(value, { stream: true });
+			const lines = buffer.split("\n");
+			buffer = lines.pop() ?? "";
+			for (const line of lines) {
+				state.raw.push(line);
+				if (line === "") {
+					const ev = flush();
+					if (ev) yield ev;
+					state = { event: null, data: [], raw: [] };
+				} else if (line.startsWith("event:")) {
+					state.event = line.slice(6).trim();
+				} else if (line.startsWith("data:")) {
+					state.data.push(line.slice(5).trim());
+				}
+			}
+		}
+		const trailing = flush();
+		if (trailing) yield trailing;
+	} finally {
+		reader.releaseLock();
+	}
+}
+
+async function* iterateAnthropicSseEvents(
+	response: Response,
+	signal?: AbortSignal,
+): AsyncGenerator<any> {
+	if (!response.body) throw new Error("Anthropic response has no body");
+	for await (const sse of iterateSseMessages(response.body, signal)) {
+		if (sse.event === "error") throw new Error(sse.data);
+		if (!ANTHROPIC_STREAM_EVENTS.has(sse.event ?? "")) continue;
+		try {
+			// parseJsonWithRepair escapes raw control chars (\t, \n, etc.) inside
+			// JSON string literals before parsing — the SDK's JSON.parse cannot.
+			yield parseJsonWithRepair(sse.data);
+		} catch (error) {
+			const msg = error instanceof Error ? error.message : String(error);
+			throw new Error(`Could not parse Anthropic SSE event "${sse.event}": ${msg}`);
+		}
+	}
+}
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -562,10 +666,12 @@ function streamWithDualCacheBreakpoints(
 			// request payload without needing a real API key.
 			options?.onPayload?.(params);
 
-			// Stream
-			const anthropicStream = client.messages.stream(params as any, {
-				signal: options?.signal,
-			});
+			// Stream — use raw HTTP + custom SSE parser instead of SDK stream().
+			// See the SSE parsing section above for the full explanation.
+			const httpResponse = await (client.messages.create as any)(
+				params,
+				{ signal: options?.signal },
+			).asResponse();
 
 			stream.push({ type: "start", partial: output });
 
@@ -576,7 +682,7 @@ function streamWithDualCacheBreakpoints(
 			};
 			const blocks = output.content as BlockWithIndex[];
 
-			for await (const event of anthropicStream) {
+			for await (const event of iterateAnthropicSseEvents(httpResponse, options?.signal)) {
 				if (event.type === "message_start") {
 					output.usage.input = event.message.usage.input_tokens ?? 0;
 					output.usage.output = event.message.usage.output_tokens ?? 0;
@@ -652,11 +758,7 @@ function streamWithDualCacheBreakpoints(
 						block.type === "toolCall"
 					) {
 						(block as any).partialJson += event.delta.partial_json;
-						try {
-							block.arguments = JSON.parse((block as any).partialJson);
-						} catch {
-							/* accumulating */
-						}
+						block.arguments = parseStreamingJson((block as any).partialJson);
 						stream.push({
 							type: "toolcall_delta",
 							contentIndex: pos,
@@ -692,11 +794,7 @@ function streamWithDualCacheBreakpoints(
 							partial: output,
 						});
 					} else if (block.type === "toolCall") {
-						try {
-							block.arguments = JSON.parse((block as any).partialJson);
-						} catch {
-							/* keep last good parse */
-						}
+						block.arguments = parseStreamingJson((block as any).partialJson);
 						delete (block as any).partialJson;
 						stream.push({
 							type: "toolcall_end",
