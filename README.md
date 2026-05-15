@@ -5,6 +5,10 @@ A [pi](https://github.com/badlogic/pi-mono) extension that implements the
 prompt-cache hit rates on MiniMax, Kimi, and other Anthropic-compatible
 providers.
 
+It also fixes a **streaming control-character bug** where the Anthropic SDK's
+`stream()` crashes on raw `\t` / `\n` bytes inside tool-call JSON, leaving tool
+arguments as `{}` and producing unrecoverable error results.
+
 > This implements the optimization proposed in
 > [badlogic/pi-mono#1737](https://github.com/badlogic/pi-mono/pull/1737),
 > which the upstream maintainer declined to merge into core.
@@ -52,6 +56,30 @@ turn N+1
 
 This dual-marking pattern aligns with the cache strategies used by
 **OpenCode**, **Kilo Code**, and **Roo Code**.
+
+### Streaming control-character fix
+
+The Anthropic SDK's `stream()` method parses each SSE event with bare
+`JSON.parse`.  When the model emits raw tab (`\t`) or newline (`\n`) bytes
+inside a tool-call JSON argument (e.g. tab-indented `oldText` in an Edit
+call), `JSON.parse` throws:
+
+```
+Bad control character in string literal in JSON at position N
+```
+
+This error propagates out of the stream, cuts it before `content_block_stop`
+fires, and leaves the tool-call arguments as `{}`.  The resulting error is
+displayed as the tool result and cannot be retried because the model has no
+context about the original arguments.
+
+**Fix:** this extension replaces `client.messages.stream()` with
+`client.messages.create().asResponse()` to get the raw HTTP response, then
+parses SSE events using `parseJsonWithRepair` (from `@earendil-works/pi-ai`),
+which escapes raw control characters before handing off to `JSON.parse`.
+Streaming tool-call argument accumulation also uses `parseStreamingJson` instead
+of bare `JSON.parse`, ensuring partial JSON with control characters is handled
+correctly throughout the stream lifecycle.
 
 ### Anthropic cache breakpoint limit
 
@@ -107,6 +135,20 @@ replaces the global api-registry entry for the `"anthropic-messages"` API type.
 This transparently intercepts every model that uses that API — all native
 Anthropic models — **without touching any model definitions, pricing, OAuth
 config, or other settings**.
+
+The custom `streamSimple` handler:
+
+1. **Applies dual cache breakpoints** — marks both the last assistant
+   `tool_use` block and the last user message block with `cache_control`.
+2. **Enforces the 4-breakpoint limit** — keeps system prompt markers and the
+   newest message-level breakpoints, removing older ones first.
+3. **Streams via raw HTTP + custom SSE parser** — uses
+   `client.messages.create().asResponse()` instead of the SDK's `stream()`,
+   then parses SSE events with `parseJsonWithRepair` to handle raw control
+   characters in tool-call JSON.
+4. **Uses `parseStreamingJson` for argument accumulation** — ensures partial
+   tool-call JSON containing control characters is parsed correctly throughout
+   the stream, not just at the end.
 
 ---
 
