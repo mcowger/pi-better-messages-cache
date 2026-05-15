@@ -109,7 +109,7 @@ const ANTHROPIC_STREAM_EVENTS = new Set([
 	"ping",
 ]);
 
-async function* iterateSseMessages(
+export async function* iterateSseMessages(
 	body: ReadableStream<Uint8Array>,
 	signal?: AbortSignal,
 ): AsyncGenerator<SseEvent> {
@@ -151,7 +151,7 @@ async function* iterateSseMessages(
 	}
 }
 
-async function* iterateAnthropicSseEvents(
+export async function* iterateAnthropicSseEvents(
 	response: Response,
 	signal?: AbortSignal,
 ): AsyncGenerator<any> {
